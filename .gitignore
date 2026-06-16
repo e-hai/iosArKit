@@ -1,0 +1,60 @@
+# ====================
+# Xcode / macOS / Swift
+# ====================
+
+## User settings
+xcuserdata/
+*.xcuserdatad
+*.xcuserstate
+
+## Build artifacts
+build/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+## CocoaPods
+Pods/
+
+## Swift Package Manager
+.build/
+.swiftpm/
+
+## Playgrounds
+playground.xcworkspace/
+timeline.xctimeline/
+
+## Xcode workspaces
+*.xcworkspace/xcuserdata/
+*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+
+# ====================
+# Secrets & Config
+# ====================
+auth.toml
+config.toml
+*.env
+*.env.*
+
+# ====================
+# OS junk
+# ====================
+.DS_Store
+Thumbs.db
+*.swp
+*.bak
+*~
+
+# ====================
+# Fastlane / CI
+# ====================
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# ====================
+# Code Injection
+# ====================
+iOSInjectionProject/
