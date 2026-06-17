@@ -52,7 +52,7 @@ enum SceneType: String, CaseIterable {
         }
     }
 
-    /// 默认滤镜索引（对应 CameraManager.filterIndex）
+    /// 默认滤镜索引（对应 CameraViewModel.filterIndex）
     var defaultFilterIndex: Int {
         switch self {
         case .scenery:      return 1   // 复古暖调（适合Scenery）

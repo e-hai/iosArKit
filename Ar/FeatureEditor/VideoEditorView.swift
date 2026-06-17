@@ -35,29 +35,18 @@ enum VideoEditorTool: String, CaseIterable {
 struct VideoEditorView: View {
     @EnvironmentObject var router: AppRouter
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var viewModel: VideoEditorViewModel
 
     /// 视频文件 URL
     let videoURL: URL
 
-    @State private var player: AVPlayer?
-    @State private var isPlaying = false
-    @State private var currentTimeValue: Double = 0  // Slider 绑定用
-    @State private var durationValue: Double = 0     // 总时长
     @State private var activeTool: VideoEditorTool?
     @State private var showUnsavedAlert = false
-    @State private var isExporting = false
-    @State private var showExportSuccess = false
 
-    // 编辑状态
-    @State private var trimStart: Double = 0
-    @State private var trimEnd: Double = 1
-    // 注意：trimEnd 在 onAppear 中被设置为 durationValue
-    @State private var playbackSpeed: Float = 1.0
-    @State private var brightness: Float = 0
-    @State private var contrast: Float = 0
-    @State private var saturation: Float = 0
-    @State private var volume: Float = 1.0
-    @State private var bgmIndex: Int = -1  // -1 = 无背景音乐
+    init(videoURL: URL) {
+        self.videoURL = videoURL
+        _viewModel = StateObject(wrappedValue: VideoEditorViewModel(videoURL: videoURL))
+    }
 
     var body: some View {
         ZStack {
@@ -84,7 +73,7 @@ struct VideoEditorView: View {
 
                 // 底部工具栏
                 videoBottomToolbar
-                    .padding(.bottom, safeAreaBottom)
+                    .padding(.bottom, UIApplication.safeAreaBottom)
                     .background(Color.black.opacity(0.8))
             }
         }
@@ -92,11 +81,10 @@ struct VideoEditorView: View {
         .navigationBarBackButtonHidden(true)
         .background(TabBarHider())
         .onAppear {
-            setupPlayer()
+            viewModel.setupPlayer()
         }
         .onDisappear {
-            player?.pause()
-            player = nil
+            viewModel.cleanup()
         }
         .alert("放弃修改？", isPresented: $showUnsavedAlert) {
             Button("继续编辑", role: .cancel) { }
@@ -106,7 +94,7 @@ struct VideoEditorView: View {
         } message: {
             Text("当前有未保存的修改，确定要放弃吗？")
         }
-        .alert("导出成功", isPresented: $showExportSuccess) {
+        .alert("导出成功", isPresented: $viewModel.showExportSuccess) {
             Button("好") {
                 router.pop(from: .photoPreview)
             }
@@ -140,8 +128,8 @@ struct VideoEditorView: View {
 
             Spacer()
 
-            Button(action: { exportVideo() }) {
-                if isExporting {
+            Button(action: { viewModel.exportVideo() }) {
+                if viewModel.isExporting {
                     ProgressView()
                         .tint(.white)
                 } else {
@@ -154,10 +142,10 @@ struct VideoEditorView: View {
                         .cornerRadius(20)
                 }
             }
-            .disabled(isExporting)
+            .disabled(viewModel.isExporting)
         }
         .padding(.horizontal, 16)
-        .padding(.top, safeAreaTop)
+        .padding(.top, UIApplication.safeAreaTop)
         .background(Color.black)
     }
 
@@ -165,8 +153,8 @@ struct VideoEditorView: View {
 
     private var videoPlayerArea: some View {
         ZStack {
-            if let player = player {
-                VideoPlayer(player: player)
+            if let videoPlayer = viewModel.player {
+                VideoPlayer(player: viewModel.player)
                     .disabled(true)  // 使用自定义控制
                     .aspectRatio(contentMode: .fit)
             } else {
@@ -184,8 +172,8 @@ struct VideoEditorView: View {
                 Spacer()
                 HStack {
                     Spacer()
-                    Button(action: togglePlayback) {
-                        Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    Button(action: viewModel.togglePlayback) {
+                        Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                             .font(.system(size: 44))
                             .foregroundColor(.white.opacity(0.7))
                     }
@@ -200,21 +188,21 @@ struct VideoEditorView: View {
 
     private var timelineBar: some View {
         VStack(spacing: 4) {
-            Slider(value: $currentTimeValue, in: 0...max(durationValue, 1)) { editing in
+            Slider(value: $viewModel.currentTimeValue, in: 0...max(viewModel.durationValue, 1)) { editing in
                 if !editing {
-                    let time = CMTime(seconds: currentTimeValue, preferredTimescale: 600)
-                    player?.seek(to: time)
+                    let time = CMTime(seconds: viewModel.currentTimeValue, preferredTimescale: 600)
+                    viewModel.player?.seek(to: time)
                 }
             }
             .tint(.orange)
             .accentColor(.orange)
 
             HStack {
-                Text(formatDuration(currentTimeValue))
+                Text(viewModel.formatDuration(viewModel.currentTimeValue))
                     .font(.caption)
                     .foregroundColor(.gray)
                 Spacer()
-                Text(formatDuration(durationValue))
+                Text(viewModel.formatDuration(viewModel.durationValue))
                     .font(.caption)
                     .foregroundColor(.gray)
             }
@@ -275,23 +263,23 @@ struct VideoEditorView: View {
             // 起止双滑块
             VStack(spacing: 4) {
                 HStack {
-                    Text("开始: \(formatDuration(trimStart))")
+                    Text("开始: \(viewModel.formatDuration(viewModel.trimStart))")
                         .font(.caption)
                         .foregroundColor(.white)
                     Spacer()
                 }
-                Slider(value: $trimStart, in: 0...trimEnd)
+                Slider(value: $viewModel.trimStart, in: 0...viewModel.trimEnd)
                     .tint(.orange)
             }
 
             VStack(spacing: 4) {
                 HStack {
-                    Text("结束: \(formatDuration(trimEnd))")
+                    Text("结束: \(viewModel.formatDuration(viewModel.trimEnd))")
                         .font(.caption)
                         .foregroundColor(.white)
                     Spacer()
                 }
-                Slider(value: $trimEnd, in: trimStart...durationValue)
+                Slider(value: $viewModel.trimEnd, in: viewModel.trimStart...viewModel.durationValue)
                     .tint(.orange)
             }
         }
@@ -303,9 +291,9 @@ struct VideoEditorView: View {
     private var videoColorPanel: some View {
         ScrollView {
             VStack(spacing: 12) {
-                colorSlider(value: $brightness, label: "亮度", range: -100...100)
-                colorSlider(value: $contrast, label: "对比度", range: -100...100)
-                colorSlider(value: $saturation, label: "饱和度", range: -100...100)
+                colorSlider(value: $viewModel.brightness, label: "亮度", range: -100...100)
+                colorSlider(value: $viewModel.contrast, label: "对比度", range: -100...100)
+                colorSlider(value: $viewModel.saturation, label: "饱和度", range: -100...100)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
@@ -344,17 +332,16 @@ struct VideoEditorView: View {
 
     private func speedButton(_ speed: Float, label: String) -> some View {
         Button(action: {
-            playbackSpeed = speed
-            player?.rate = isPlaying ? speed : 0
+            viewModel.setSpeed(speed)
         }) {
             Text(label)
                 .font(.headline)
                 .fontWeight(.medium)
-                .foregroundColor(playbackSpeed == speed ? .black : .white)
+                .foregroundColor(viewModel.playbackSpeed == speed ? .black : .white)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 10)
                 .background(
-                    playbackSpeed == speed
+                    viewModel.playbackSpeed == speed
                         ? Color.white
                         : Color.white.opacity(0.2)
                 )
@@ -416,11 +403,11 @@ struct VideoEditorView: View {
                         .font(.caption)
                         .foregroundColor(.white)
                     Spacer()
-                    Text("\(Int(volume * 100))%")
+                    Text("\(Int(viewModel.volume * 100))%")
                         .font(.caption)
                         .foregroundColor(.orange)
                 }
-                Slider(value: $volume, in: 0...1)
+                Slider(value: $viewModel.volume, in: 0...1)
                     .tint(.orange)
             }
             .padding(.horizontal, 20)
@@ -445,84 +432,20 @@ struct VideoEditorView: View {
     }
 
     private func musicItem(name: String, index: Int) -> some View {
-        Button(action: { bgmIndex = index }) {
+        Button(action: { viewModel.bgmIndex = index }) {
             VStack(spacing: 4) {
-                Image(systemName: bgmIndex == index ? "music.note.list" : "music.note")
+                Image(systemName: viewModel.bgmIndex == index ? "music.note.list" : "music.note")
                     .font(.system(size: 24))
                 Text(name)
                     .font(.caption2)
             }
-            .foregroundColor(bgmIndex == index ? .orange : .white)
+            .foregroundColor(viewModel.bgmIndex == index ? .orange : .white)
             .frame(width: 64, height: 64)
-            .background(bgmIndex == index ? Color.orange.opacity(0.2) : Color.white.opacity(0.1))
+            .background(viewModel.bgmIndex == index ? Color.orange.opacity(0.2) : Color.white.opacity(0.1))
             .cornerRadius(12)
         }
     }
 
-    // MARK: - 播放控制
-
-    private func setupPlayer() {
-        let asset = AVAsset(url: videoURL)
-        let durationCM = asset.duration
-        durationValue = CMTimeGetSeconds(durationCM)
-        trimEnd = durationValue
-
-        let playerItem = AVPlayerItem(asset: asset)
-        player = AVPlayer(playerItem: playerItem)
-
-        // 时间观察
-        player?.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.1, preferredTimescale: 600), queue: .main) { time in
-            currentTimeValue = CMTimeGetSeconds(time)
-        }
-    }
-
-    private func togglePlayback() {
-        if isPlaying {
-            player?.pause()
-        } else {
-            player?.play()
-            player?.rate = playbackSpeed
-        }
-        isPlaying.toggle()
-    }
-
-    // MARK: - 导出
-
-    private func exportVideo() {
-        guard !isExporting else { return }
-        isExporting = true
-
-        // TODO: M0-4 使用 AVAssetExportSession 导出编辑后的视频
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            isExporting = false
-            showExportSuccess = true
-        }
-    }
-
-    // MARK: - 时间格式化
-
-    private func formatDuration(_ seconds: Double) -> String {
-        guard !seconds.isNaN, !seconds.isInfinite else { return "00:00" }
-        let mins = Int(seconds) / 60
-        let secs = Int(seconds) % 60
-        return String(format: "%02d:%02d", mins, secs)
-    }
-
-    // MARK: - Safe Area
-
-    private var safeAreaTop: CGFloat {
-        let scenes = UIApplication.shared.connectedScenes
-        let windowScene = scenes.first as? UIWindowScene
-        let window = windowScene?.windows.first
-        return window?.safeAreaInsets.top ?? 0
-    }
-
-    private var safeAreaBottom: CGFloat {
-        let scenes = UIApplication.shared.connectedScenes
-        let windowScene = scenes.first as? UIWindowScene
-        let window = windowScene?.windows.first
-        return window?.safeAreaInsets.bottom ?? 0
-    }
 }
 
 #Preview {

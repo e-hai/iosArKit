@@ -6,10 +6,9 @@
 //
 
 import SwiftUI
-import Combine
 
 struct CameraView: View {
-    @StateObject private var manager = CameraManager()
+    @StateObject private var viewModel = CameraViewModel()
     @EnvironmentObject var router: AppRouter
     @State private var showEffectPicker = false
 
@@ -17,13 +16,10 @@ struct CameraView: View {
     @AppStorage("gridType") private var gridType = 0
     @AppStorage("timerDuration") private var timerDuration = 0
 
-    // 倒计时驱动
-    @State private var timerCancellable: AnyCancellable?
-
     var body: some View {
         ZStack {
             // 层级 0：相机预览
-            CameraPreview(manager: manager)
+            CameraPreview(viewModel: viewModel)
                 .ignoresSafeArea()
 
             // 层级 1：构图辅助线
@@ -34,14 +30,14 @@ struct CameraView: View {
             }
 
             // 层级 2：对焦框
-            if let focusPoint = manager.focusPoint {
-                FocusRectangleView(point: focusPoint, isLocked: manager.isExposureLocked)
+            if let focusPoint = viewModel.focusPoint {
+                FocusRectangleView(point: focusPoint, isLocked: viewModel.isExposureLocked)
                     .allowsHitTesting(false)
             }
 
             // 层级 3：倒计时浮层
-            if manager.isTimerCountingDown {
-                CountdownOverlayView(seconds: manager.countdownSecondsRemaining)
+            if viewModel.isTimerCountingDown {
+                CountdownOverlayView(seconds: viewModel.countdownSecondsRemaining)
                     .onTapGesture { cancelCountdown() }
             }
 
@@ -49,7 +45,7 @@ struct CameraView: View {
             VStack(spacing: 0) {
                 // 顶部状态栏
                 topBarView
-                    .padding(.top, safeAreaTop)
+                    .padding(.top, UIApplication.safeAreaTop)
 
                 Spacer()
 
@@ -71,7 +67,7 @@ struct CameraView: View {
                     // 底部次级：前后摄切换
                     HStack {
                         Spacer()
-                        Button(action: { manager.switchCamera() }) {
+                        Button(action: { viewModel.switchCamera() }) {
                             Image(systemName: "arrow.triangle.2.circlepath.camera.fill")
                                 .font(.system(size: 22))
                                 .foregroundColor(.white)
@@ -96,7 +92,7 @@ struct CameraView: View {
             // 隐藏 NavigationLink：拍照后直接跳转编辑页
             NavigationLink(
                 destination: Group {
-                    if let image = manager.capturedPhotoImage {
+                    if let image = viewModel.capturedPhotoImage {
                         PhotoEditorView(inputImage: image)
                     } else {
                         EmptyView()
@@ -110,19 +106,19 @@ struct CameraView: View {
         .background(TabBarHider())
         .onAppear {
             if let scene = router.selectedScene {
-                manager.scene = scene
+                viewModel.scene = scene
             } else {
-                manager.filterIndex = router.currentFilterIndex
+                viewModel.filterIndex = router.currentFilterIndex
             }
-            manager.start()
+            viewModel.start()
         }
         .onDisappear {
-            manager.stop()
-            timerCancellable?.cancel()
+            viewModel.stop()
+            viewModel.cancelAllPendingOperations()
             capturedPhotoCleanup()
         }
         // 拍照完成 → 跳转编辑页
-        .onChange(of: manager.capturedPhotoImage) { image in
+        .onChange(of: viewModel.capturedPhotoImage) { image in
             print("📷 onChange capturedPhotoImage: \(image != nil ? "有图片" : "nil")")
             print("📷   isPhotoPreviewActive 当前值: \(router.isPhotoPreviewActive)")
             if image != nil {
@@ -131,14 +127,14 @@ struct CameraView: View {
             }
         }
         // 旧式兼容：didCapturePhoto 标记清除
-        .onChange(of: manager.didCapturePhoto) { captured in
+        .onChange(of: viewModel.didCapturePhoto) { captured in
             if captured {
-                manager.didCapturePhoto = false
+                viewModel.didCapturePhoto = false
             }
         }
-        .onChange(of: manager.didFinishRecording) { finished in
+        .onChange(of: viewModel.didFinishRecording) { finished in
             if finished {
-                manager.didFinishRecording = false
+                viewModel.didFinishRecording = false
                 router.pop(from: .camera)
             }
         }
@@ -150,8 +146,8 @@ struct CameraView: View {
         HStack(spacing: 12) {
             // 返回按钮
             Button(action: {
-                manager.stop()
-                manager.capturedPhotoImage = nil
+                viewModel.stop()
+                viewModel.capturedPhotoImage = nil
                 router.pop(from: .camera)
             }) {
                 Image(systemName: "chevron.left")
@@ -193,10 +189,10 @@ struct CameraView: View {
 
     private var flashToggleButton: some View {
         Button(action: {
-            switch manager.flashMode {
-            case .off:  manager.setFlash(.on)
-            case .on:   manager.setFlash(.auto)
-            case .auto: manager.setFlash(.off)
+            switch viewModel.flashMode {
+            case .off:  viewModel.setFlash(.on)
+            case .on:   viewModel.setFlash(.auto)
+            case .auto: viewModel.setFlash(.off)
             }
         }) {
             Image(systemName: flashIcon)
@@ -209,7 +205,7 @@ struct CameraView: View {
     }
 
     private var flashIcon: String {
-        switch manager.flashMode {
+        switch viewModel.flashMode {
         case .off:  return "bolt.slash.fill"
         case .on:   return "bolt.fill"
         case .auto: return "bolt.badge.a.fill"
@@ -217,7 +213,7 @@ struct CameraView: View {
     }
 
     private var flashColor: Color {
-        switch manager.flashMode {
+        switch viewModel.flashMode {
         case .off:  return .white
         case .on:   return .yellow
         case .auto: return .yellow
@@ -228,10 +224,10 @@ struct CameraView: View {
 
     private var hdrToggleButton: some View {
         Button(action: {
-            switch manager.hdrMode {
-            case .auto: manager.setHDRMode(.on)
-            case .on:   manager.setHDRMode(.off)
-            case .off:  manager.setHDRMode(.auto)
+            switch viewModel.hdrMode {
+            case .auto: viewModel.setHDRMode(.on)
+            case .on:   viewModel.setHDRMode(.off)
+            case .off:  viewModel.setHDRMode(.auto)
             }
         }) {
             Text("HDR")
@@ -246,7 +242,7 @@ struct CameraView: View {
     }
 
     private var hdrTextColor: Color {
-        switch manager.hdrMode {
+        switch viewModel.hdrMode {
         case .auto: return .white
         case .on:   return .yellow
         case .off:  return .gray
@@ -257,12 +253,12 @@ struct CameraView: View {
 
     private var nightModeToggleButton: some View {
         Button(action: {
-            manager.setNightMode(manager.nightMode == .off ? .on : .off)
+            viewModel.setNightMode(viewModel.nightMode == .off ? .on : .off)
         }) {
             Text("夜景")
                 .font(.caption2)
                 .fontWeight(.semibold)
-                .foregroundColor(manager.nightMode == .on ? .yellow : .white)
+                .foregroundColor(viewModel.nightMode == .on ? .yellow : .white)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(Color.black.opacity(0.4))
@@ -290,16 +286,16 @@ struct CameraView: View {
 
     private var zoomControlView: some View {
         VStack(spacing: 12) {
-            ForEach(manager.availableZoomPresets, id: \.rawValue) { preset in
-                Button(action: { manager.setZoomPreset(preset) }) {
+            ForEach(viewModel.availableZoomPresets, id: \.rawValue) { preset in
+                Button(action: { viewModel.setZoomPreset(preset) }) {
                     Text(preset.label)
                         .font(.caption)
-                        .fontWeight(manager.currentZoomFactor == preset.rawValue ? .bold : .regular)
+                        .fontWeight(viewModel.currentZoomFactor == preset.rawValue ? .bold : .regular)
                         .foregroundColor(.white)
                         .frame(width: 36, height: 36)
                         .background(
                             Circle()
-                                .fill(manager.currentZoomFactor == preset.rawValue
+                                .fill(viewModel.currentZoomFactor == preset.rawValue
                                       ? Color.white.opacity(0.3)
                                       : Color.black.opacity(0.4))
                         )
@@ -354,15 +350,15 @@ struct CameraView: View {
     }
 
     private func modeButton(title: String, mode: CaptureMode) -> some View {
-        Button(action: { manager.captureMode = mode }) {
+        Button(action: { viewModel.captureMode = mode }) {
             Text(title)
                 .font(.caption)
                 .fontWeight(.medium)
-                .foregroundColor(manager.captureMode == mode ? .black : .white)
+                .foregroundColor(viewModel.captureMode == mode ? .black : .white)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(
-                    manager.captureMode == mode
+                    viewModel.captureMode == mode
                         ? Color.white
                         : Color.clear
                 )
@@ -382,7 +378,7 @@ struct CameraView: View {
             )
             .overlay(
                 Group {
-                    if manager.captureMode == .video {
+                    if viewModel.captureMode == .video {
                         RoundedRectangle(cornerRadius: 4)
                             .fill(Color.red)
                             .frame(width: 24, height: 24)
@@ -393,13 +389,13 @@ struct CameraView: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in
-                        if !manager.isBurstCapturing && manager.captureMode == .photo {
-                            manager.startBurstCapture()
+                        if !viewModel.isBurstCapturing && viewModel.captureMode == .photo {
+                            viewModel.startBurstCapture()
                         }
                     }
                     .onEnded { _ in
-                        if manager.isBurstCapturing {
-                            manager.stopBurstCapture()
+                        if viewModel.isBurstCapturing {
+                            viewModel.stopBurstCapture()
                         }
                     }
             )
@@ -407,12 +403,12 @@ struct CameraView: View {
             .highPriorityGesture(
                 TapGesture()
                     .onEnded {
-                        switch manager.captureMode {
+                        switch viewModel.captureMode {
                         case .video:
-                            if manager.isRecording {
-                                manager.stopRecording()
+                            if viewModel.isRecording {
+                                viewModel.stopRecording()
                             } else {
-                                manager.startRecording()
+                                viewModel.startRecording()
                             }
                         case .panorama:
                             // 全景占位：暂不实现
@@ -420,9 +416,9 @@ struct CameraView: View {
                         default:
                             if timerDuration > 0 {
                                 let seconds = [0, 3, 5, 10][timerDuration]
-                                startCountdown(seconds: seconds)
+                                viewModel.startCountdown(seconds: seconds)
                             } else {
-                                manager.capturePhoto()
+                                viewModel.capturePhoto()
                             }
                         }
                     }
@@ -432,33 +428,16 @@ struct CameraView: View {
     // MARK: - 倒计时控制
 
     private func startCountdown(seconds: Int) {
-        manager.isTimerCountingDown = true
-        manager.countdownSecondsRemaining = seconds
-
-        timerCancellable = Timer.publish(every: 1, on: .main, in: .common)
-            .autoconnect()
-            .sink { _ in
-                if manager.countdownSecondsRemaining <= 1 {
-                    manager.isTimerCountingDown = false
-                    manager.capturePhoto()
-                    timerCancellable?.cancel()
-                    timerCancellable = nil
-                } else {
-                    manager.countdownSecondsRemaining -= 1
-                }
-            }
+        viewModel.startCountdown(seconds: seconds)
     }
 
     /// 拍照完成后清理图片引用（避免下次进入时重复跳转）
     private func capturedPhotoCleanup() {
-        router.capturedPhotoImage = nil
+        viewModel.capturedPhotoImage = nil
     }
 
     private func cancelCountdown() {
-        manager.isTimerCountingDown = false
-        manager.countdownSecondsRemaining = 0
-        timerCancellable?.cancel()
-        timerCancellable = nil
+        viewModel.cancelCountdown()
     }
 
     // MARK: - 特效选择浮层
@@ -508,7 +487,7 @@ struct CameraView: View {
                     }
                 }
 
-                Picker("滤镜", selection: $manager.filterIndex) {
+                Picker("滤镜", selection: $viewModel.filterIndex) {
                     Text("原画原色").tag(0)
                     Text("复古暖调").tag(1)
                     Text("黑白电影").tag(2)
@@ -530,15 +509,6 @@ struct CameraView: View {
         guard let scene = router.selectedScene else { return [] }
         return scene.recommendedEffects.components(separatedBy: " · ")
     }
-}
-
-// MARK: - Safe Area 顶部高度
-
-private var safeAreaTop: CGFloat {
-    let scenes = UIApplication.shared.connectedScenes
-    let windowScene = scenes.first as? UIWindowScene
-    let window = windowScene?.windows.first
-    return window?.safeAreaInsets.top ?? 0
 }
 
 // MARK: - 构图辅助线

@@ -10,7 +10,7 @@ import MetalKit
 import CoreImage
 
 struct CameraPreview: UIViewRepresentable {
-    @ObservedObject var manager: CameraManager
+    @ObservedObject var viewModel: CameraViewModel
 
     func makeUIView(context: Context) -> MTKView {
         let mtkView = MTKView()
@@ -66,12 +66,12 @@ struct CameraPreview: UIViewRepresentable {
         @objc private func handleTap(_ sender: UITapGestureRecognizer) {
             let location = sender.location(in: sender.view)
             guard let view = sender.view else { return }
-            parent.manager.focusAndExpose(at: location, in: view.bounds.size)
+            parent.viewModel.focusAndExpose(at: location, in: view.bounds.size)
         }
 
         @objc private func handleLongPress(_ sender: UILongPressGestureRecognizer) {
             guard sender.state == .began, let view = sender.view else { return }
-            parent.manager.lockFocusAndExposure(at: sender.location(in: view), in: view.bounds.size)
+            parent.viewModel.lockFocusAndExposure(at: sender.location(in: view), in: view.bounds.size)
         }
 
         // MARK: - MTKViewDelegate
@@ -80,7 +80,7 @@ struct CameraPreview: UIViewRepresentable {
         }
 
         func draw(in view: MTKView) {
-            guard let currentFrame = parent.manager.currentRenderedFrame,
+            guard let currentFrame = parent.viewModel.currentRenderedFrame,
                   let currentDrawable = view.currentDrawable,
                   let commandBuffer = commandQueue?.makeCommandBuffer() else { return }
 

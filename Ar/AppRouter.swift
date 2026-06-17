@@ -38,9 +38,6 @@ final class AppRouter: ObservableObject {
     /// 统一控制当前全栈应用的滤镜样式（0: 无, 1: 复古, 2: 黑白）
     @Published var currentFilterIndex: Int = 0
 
-    /// 拍照后的图片数据，传给预览/编辑页
-    @Published var capturedPhotoImage: UIImage?
-
     // MARK: - 导航方法
 
     /// 选择场景并跳转到取景页

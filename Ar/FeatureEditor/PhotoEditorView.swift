@@ -6,9 +6,6 @@
 //
 
 import SwiftUI
-import CoreImage
-import CoreImage.CIFilterBuiltins
-import Photos
 
 // MARK: - 编辑工具类型
 
@@ -30,83 +27,24 @@ enum EditorTool: String, CaseIterable {
     }
 }
 
-// MARK: - 裁剪比例
-
-enum CropAspectRatio: String, CaseIterable {
-    case free       = "自由"
-    case square     = "1:1"
-    case fourThree  = "4:3"
-    case nineSixteen = "9:16"
-    case sixteenNine = "16:9"
-
-    var ratio: CGFloat? {
-        switch self {
-        case .free: return nil
-        case .square: return 1
-        case .fourThree: return 4/3
-        case .nineSixteen: return 9/16
-        case .sixteenNine: return 16/9
-        }
-    }
-}
-
-// MARK: - 图片编辑状态
-
-struct PhotoEditState {
-    // 调色参数：-100 ~ +100（锐度 0~100）
-    var brightness: Float = 0
-    var contrast: Float = 0
-    var saturation: Float = 0
-    var warmth: Float = 0
-    var highlights: Float = 0
-    var shadows: Float = 0
-    var sharpness: Float = 0
-
-    // 裁剪/旋转
-    var cropAspectRatio: CropAspectRatio = .free
-    var rotationAngle: Int = 0       // 0/90/180/270
-    var isFlippedHorizontal = false
-    var isFlippedVertical = false
-
-    // 特效
-    var filterIndex: Int = 0        // 0=原画原色, 1=复古暖调, 2=黑白电影
-
-    // 文字（简单存储）
-    var textOverlays: [TextOverlay] = []
-
-    // 是否有未保存的修改
-    var hasUnsavedChanges: Bool {
-        brightness != 0 || contrast != 0 || saturation != 0 ||
-        warmth != 0 || highlights != 0 || shadows != 0 ||
-        sharpness != 0 || rotationAngle != 0 ||
-        isFlippedHorizontal || isFlippedVertical ||
-        filterIndex != 0 || !textOverlays.isEmpty
-    }
-}
-
-struct TextOverlay: Identifiable {
-    let id = UUID()
-    var text: String
-    var fontSize: CGFloat = 24
-    var color: Color = .white
-    var position: CGPoint = .init(x: 0.5, y: 0.5)
-}
-
 // MARK: - 图片编辑页
 
 struct PhotoEditorView: View {
     @EnvironmentObject var router: AppRouter
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var viewModel: PhotoEditorViewModel
 
-    /// 原始图片
+    /// 原始输入图片
     let inputImage: UIImage
 
-    @State private var editState = PhotoEditState()
     @State private var activeTool: EditorTool?
     @State private var showUnsavedAlert = false
-    @State private var isSaving = false
-    @State private var showSaveSuccess = false
     @State private var pendingDismiss = false
+
+    init(inputImage: UIImage) {
+        self.inputImage = inputImage
+        _viewModel = StateObject(wrappedValue: PhotoEditorViewModel(inputImage: inputImage))
+    }
 
     // 预览缩放
     @State private var previewScale: CGFloat = 1.0
@@ -132,7 +70,7 @@ struct PhotoEditorView: View {
 
                 // 底部工具栏
                 bottomToolbar
-                    .padding(.bottom, safeAreaBottom)
+                    .padding(.bottom, UIApplication.safeAreaBottom)
                     .background(Color.black.opacity(0.8))
             }
         }
@@ -142,19 +80,16 @@ struct PhotoEditorView: View {
         .alert("放弃修改？", isPresented: $showUnsavedAlert) {
             Button("继续编辑", role: .cancel) { }
             Button("放弃", role: .destructive) {
-                router.capturedPhotoImage = nil
                 router.pop(from: .photoPreview)
             }
         } message: {
             Text("当前有未保存的修改，确定要放弃吗？")
         }
-        .alert("保存成功", isPresented: $showSaveSuccess) {
+        .alert("保存成功", isPresented: $viewModel.showSaveSuccess) {
             Button("返回继续拍摄") {
-                router.capturedPhotoImage = nil
                 router.pop(from: .photoPreview)
             }
             Button("好的", role: .cancel) {
-                router.capturedPhotoImage = nil
                 router.pop(from: .photoPreview)
             }
         } message: {
@@ -168,7 +103,7 @@ struct PhotoEditorView: View {
         HStack {
             // 返回（检查未保存修改）
             Button(action: {
-                if editState.hasUnsavedChanges {
+                if viewModel.editState.hasUnsavedChanges {
                     showUnsavedAlert = true
                 } else {
                     router.pop(from: .photoPreview)
@@ -193,8 +128,8 @@ struct PhotoEditorView: View {
             Spacer()
 
             // 保存到相册
-            Button(action: { saveEditedPhoto() }) {
-                if isSaving {
+            Button(action: { viewModel.saveEditedPhoto() }) {
+                if viewModel.isSaving {
                     ProgressView()
                         .tint(.white)
                 } else {
@@ -207,10 +142,10 @@ struct PhotoEditorView: View {
                         .cornerRadius(20)
                 }
             }
-            .disabled(isSaving)
+            .disabled(viewModel.isSaving)
         }
         .padding(.horizontal, 16)
-        .padding(.top, safeAreaTop)
+        .padding(.top, UIApplication.safeAreaTop)
         .background(Color.black)
     }
 
@@ -304,16 +239,16 @@ struct PhotoEditorView: View {
                 HStack(spacing: 8) {
                     ForEach(CropAspectRatio.allCases, id: \.rawValue) { ratio in
                         Button(action: {
-                            editState.cropAspectRatio = ratio
+                            viewModel.editState.cropAspectRatio = ratio
                         }) {
                             Text(ratio.rawValue)
                                 .font(.caption)
                                 .fontWeight(.medium)
-                                .foregroundColor(editState.cropAspectRatio == ratio ? .black : .white)
+                                .foregroundColor(viewModel.editState.cropAspectRatio == ratio ? .black : .white)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 6)
                                 .background(
-                                    editState.cropAspectRatio == ratio
+                                    viewModel.editState.cropAspectRatio == ratio
                                         ? Color.white
                                         : Color.white.opacity(0.2)
                                 )
@@ -340,7 +275,7 @@ struct PhotoEditorView: View {
 
     private func rotateButton(angle: Int, icon: String, label: String) -> some View {
         Button(action: {
-            editState.rotationAngle = (editState.rotationAngle + angle + 360) % 360
+            viewModel.editState.rotationAngle = (viewModel.editState.rotationAngle + angle + 360) % 360
         }) {
             VStack(spacing: 4) {
                 Image(systemName: icon)
@@ -355,8 +290,8 @@ struct PhotoEditorView: View {
     private func flipButton(axis: FlipAxis, icon: String, label: String) -> some View {
         Button(action: {
             switch axis {
-            case .horizontal: editState.isFlippedHorizontal.toggle()
-            case .vertical:   editState.isFlippedVertical.toggle()
+            case .horizontal: viewModel.editState.isFlippedHorizontal.toggle()
+            case .vertical:   viewModel.editState.isFlippedVertical.toggle()
             }
         }) {
             VStack(spacing: 4) {
@@ -366,8 +301,8 @@ struct PhotoEditorView: View {
                     .font(.caption2)
             }
             .foregroundColor(
-                axis == .horizontal && editState.isFlippedHorizontal ||
-                axis == .vertical && editState.isFlippedVertical
+                axis == .horizontal && viewModel.editState.isFlippedHorizontal ||
+                axis == .vertical && viewModel.editState.isFlippedVertical
                 ? .orange : .white
             )
         }
@@ -382,13 +317,13 @@ struct PhotoEditorView: View {
     private var colorPanel: some View {
         ScrollView {
             VStack(spacing: 16) {
-                colorSlider(value: $editState.brightness, label: "亮度", range: -100...100)
-                colorSlider(value: $editState.contrast, label: "对比度", range: -100...100)
-                colorSlider(value: $editState.saturation, label: "饱和度", range: -100...100)
-                colorSlider(value: $editState.warmth, label: "色温", range: -100...100)
-                colorSlider(value: $editState.highlights, label: "高光", range: -100...100)
-                colorSlider(value: $editState.shadows, label: "阴影", range: -100...100)
-                colorSlider(value: $editState.sharpness, label: "锐度", range: 0...100)
+                colorSlider(value: $viewModel.editState.brightness, label: "亮度", range: -100...100)
+                colorSlider(value: $viewModel.editState.contrast, label: "对比度", range: -100...100)
+                colorSlider(value: $viewModel.editState.saturation, label: "饱和度", range: -100...100)
+                colorSlider(value: $viewModel.editState.warmth, label: "色温", range: -100...100)
+                colorSlider(value: $viewModel.editState.highlights, label: "高光", range: -100...100)
+                colorSlider(value: $viewModel.editState.shadows, label: "阴影", range: -100...100)
+                colorSlider(value: $viewModel.editState.sharpness, label: "锐度", range: 0...100)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
@@ -418,7 +353,7 @@ struct PhotoEditorView: View {
 
     private var filterPanel: some View {
         VStack(spacing: 12) {
-            Picker("滤镜", selection: $editState.filterIndex) {
+            Picker("滤镜", selection: $viewModel.editState.filterIndex) {
                 Text("原画原色").tag(0)
                 Text("复古暖调").tag(1)
                 Text("黑白电影").tag(2)
@@ -442,7 +377,7 @@ struct PhotoEditorView: View {
 
     private func filterThumbnail(name: String, index: Int) -> some View {
         Button(action: {
-            editState.filterIndex = index
+            viewModel.editState.filterIndex = index
         }) {
             VStack(spacing: 4) {
                 Image(uiImage: inputImage)
@@ -452,11 +387,11 @@ struct PhotoEditorView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(editState.filterIndex == index ? Color.orange : Color.clear, lineWidth: 2)
+                            .stroke(viewModel.editState.filterIndex == index ? Color.orange : Color.clear, lineWidth: 2)
                     )
                 Text(name)
                     .font(.caption2)
-                    .foregroundColor(editState.filterIndex == index ? .orange : .white)
+                    .foregroundColor(viewModel.editState.filterIndex == index ? .orange : .white)
             }
         }
     }
@@ -548,119 +483,11 @@ struct PhotoEditorView: View {
         }
     }
 
-    // MARK: - 保存编辑后的图片
+    // MARK: - 保存
 
+    /// 保存编辑后的图片（委托给 ViewModel）
     private func saveEditedPhoto() {
-        guard !isSaving else { return }
-        isSaving = true
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            // 用 Core Image 应用编辑参数
-            let editedImage = applyEdits(to: inputImage)
-
-            DispatchQueue.main.async {
-                UIImageWriteToSavedPhotosAlbum(editedImage, nil, nil, nil)
-                isSaving = false
-                showSaveSuccess = true
-            }
-        }
-    }
-
-    /// 应用所有编辑参数到原图，返回处理后的 UIImage
-    private func applyEdits(to image: UIImage) -> UIImage {
-        guard let cgImage = image.cgImage else { return image }
-
-        let ciImage = CIImage(cgImage: cgImage)
-        let context = CIContext(options: [.workingColorSpace: NSNull()])
-        var outputImage = ciImage
-
-        // 1. 应用特效滤镜
-        if editState.filterIndex != 0 {
-            switch editState.filterIndex {
-            case 1:
-                if let filter = CIFilter(name: "CISepiaTone") {
-                    filter.setValue(outputImage, forKey: kCIInputImageKey)
-                    filter.setValue(0.7, forKey: kCIInputIntensityKey)
-                    if let out = filter.outputImage { outputImage = out }
-                }
-            case 2:
-                if let filter = CIFilter(name: "CIPhotoEffectMono") {
-                    filter.setValue(outputImage, forKey: kCIInputImageKey)
-                    if let out = filter.outputImage { outputImage = out }
-                }
-            default: break
-            }
-        }
-
-        // 2. 基础调色（使用 CIColorControls 等）
-        let colorControls = CIFilter.colorControls()
-        colorControls.inputImage = outputImage
-        colorControls.brightness = editState.brightness / 100.0
-        colorControls.contrast = 1.0 + editState.contrast / 100.0
-        colorControls.saturation = 1.0 + editState.saturation / 100.0
-        if let out = colorControls.outputImage { outputImage = out }
-
-        // 色温
-        if editState.warmth != 0 {
-            let tempFilter = CIFilter.temperatureAndTint()
-            tempFilter.inputImage = outputImage
-            let warmthValue = editState.warmth * 5000 / 100
-            tempFilter.neutral = CIVector(x: CGFloat(6500 - warmthValue), y: 0)
-            if let out = tempFilter.outputImage { outputImage = out }
-        }
-
-        // 锐度
-        if editState.sharpness > 0 {
-            let sharpen = CIFilter.sharpenLuminance()
-            sharpen.inputImage = outputImage
-            sharpen.sharpness = editState.sharpness / 100.0
-            if let out = sharpen.outputImage { outputImage = out }
-        }
-
-        // 高光/阴影（使用 CIGammaAdjust 近似模拟）
-        if editState.highlights != 0 || editState.shadows != 0 {
-            let highlightShadow = CIFilter.highlightShadowAdjust()
-            highlightShadow.inputImage = outputImage
-            highlightShadow.highlightAmount = 1.0 + editState.highlights / 100.0
-            highlightShadow.shadowAmount = 1.0 + editState.shadows / 100.0
-            if let out = highlightShadow.outputImage { outputImage = out }
-        }
-
-        // 3. 旋转
-        if editState.rotationAngle != 0 {
-            let angle = CGFloat(editState.rotationAngle) * .pi / 180.0
-            outputImage = outputImage.transformed(by: CGAffineTransform(rotationAngle: angle))
-        }
-
-        // 4. 翻转
-        if editState.isFlippedHorizontal {
-            outputImage = outputImage.transformed(by: CGAffineTransform(scaleX: -1, y: 1))
-        }
-        if editState.isFlippedVertical {
-            outputImage = outputImage.transformed(by: CGAffineTransform(scaleX: 1, y: -1))
-        }
-
-        // 渲染回 UIImage
-        let rect = outputImage.extent
-        if let resultCG = context.createCGImage(outputImage, from: rect) {
-            return UIImage(cgImage: resultCG)
-        }
-        return image
-    }
-    // MARK: - Safe Area
-
-    private var safeAreaTop: CGFloat {
-        let scenes = UIApplication.shared.connectedScenes
-        let windowScene = scenes.first as? UIWindowScene
-        let window = windowScene?.windows.first
-        return window?.safeAreaInsets.top ?? 0
-    }
-
-    private var safeAreaBottom: CGFloat {
-        let scenes = UIApplication.shared.connectedScenes
-        let windowScene = scenes.first as? UIWindowScene
-        let window = windowScene?.windows.first
-        return window?.safeAreaInsets.bottom ?? 0
+        viewModel.saveEditedPhoto()
     }
 }
 
